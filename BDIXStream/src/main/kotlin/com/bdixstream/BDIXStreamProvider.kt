@@ -235,24 +235,25 @@ class BDIXStreamProvider : MainAPI() {
         defaultPoster: String?
     ): List<Episode> {
         val episodes = mutableListOf<Episode>()
-        val queue = ArrayDeque<Pair<String, List<Entry>>>()
-        queue.add(baseUrl to initialEntries)
+        val queue = ArrayDeque<Triple<String, List<Entry>, Int?>>()
+        queue.add(Triple(baseUrl, initialEntries, parseSeason(baseUrl)))
 
         val visited = HashSet<String>()
         var count = 0
 
-        while (queue.isNotEmpty() && count < 150) {
-            val (dirUrl, entries) = queue.removeFirst()
+        while (queue.isNotEmpty() && count < 200) {
+            val (dirUrl, entries, currentSeason) = queue.removeFirst()
             if (!visited.add(dirUrl)) continue
             count++
 
             val videoEntries = entries.filter { it.video != null }
             val imagePoster = entries.firstNotNullOfOrNull { it.poster } ?: defaultPoster
+            val inferredSeason = currentSeason ?: parseSeason(dirUrl) ?: 1
 
             for (e in videoEntries) {
                 val vUrl = e.video ?: continue
                 val epTitle = displayName(vUrl)
-                val sNum = parseSeason(vUrl) ?: parseSeason(dirUrl) ?: parseSeason(baseUrl) ?: 1
+                val sNum = parseSeason(vUrl) ?: inferredSeason
                 val eNum = parseEpisode(vUrl) ?: 0
 
                 episodes.add(
@@ -267,8 +268,9 @@ class BDIXStreamProvider : MainAPI() {
 
             for (sub in entries.filter { it.isDirectory }) {
                 if (depth(sub.url) <= depth(baseUrl) + 7) {
+                    val subSeason = parseSeason(sub.title) ?: inferredSeason
                     val subEntries = try { readDirectory(sub.url, "TvSeries") } catch (_: Exception) { emptyList() }
-                    queue.add(sub.url to subEntries)
+                    queue.add(Triple(sub.url, subEntries, subSeason))
                 }
             }
         }
