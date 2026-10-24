@@ -2,7 +2,7 @@
     {
         "fileHash": "sha256-c809d4b327ecb75af7bfbb732b38486e65f8bc7969543a2cfba00992907d4dfb",
         "apiVersion": 1,
-        "repositoryUrl": "https://github.com/user/repo",
+        "repositoryUrl": "https://github.com/shihabfarazi/CSBDIX",
         "fileSize": 24651,
         "status": 1,
         "language": "en",
@@ -18,7 +18,7 @@
         "version": 1,
         "internalName": "BDIXStream",
         "description": "Browse and play media from DhakaFlix BDIX FTP servers.",
-        "url": "https://raw.githubusercontent.com/user/repo/builds/BDIXStream.cs3",
+        "url": "https://raw.githubusercontent.com/shihabfarazi/CSBDIX/builds/BDIXStream.cs3",
         "name": "BDIXStream"
     }
 ]
