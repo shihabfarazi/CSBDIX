@@ -3,6 +3,7 @@ package com.bdixstream
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
+import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
@@ -152,6 +153,17 @@ class BDIXStreamProvider : MainAPI() {
             }
         }
 
+        // If this is a directory folder (like a TV series root or movie year folder) containing subfolders or videos
+        val episodes = collectEpisodes(url, entries, poster)
+        if (episodes.isNotEmpty() && (kind == "TvSeries" || kind == "Anime")) {
+            val tvType = if (kind == "Anime") TvType.Anime else TvType.TvSeries
+            return newTvSeriesLoadResponse(title, url, tvType, episodes) {
+                this.posterUrl = poster
+                this.year = year
+                this.plot = "BDIX $kind library."
+            }
+        }
+
         val children = entries.filter { it.isDirectory }.take(100).map { it.asSearchResponse(kind) }
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
             this.posterUrl = poster
@@ -172,7 +184,7 @@ class BDIXStreamProvider : MainAPI() {
         val visited = HashSet<String>()
         var count = 0
 
-        while (queue.isNotEmpty() && count < 50) {
+        while (queue.isNotEmpty() && count < 60) {
             val (dirUrl, entries) = queue.removeFirst()
             if (!visited.add(dirUrl)) continue
             count++
@@ -197,7 +209,7 @@ class BDIXStreamProvider : MainAPI() {
             }
 
             for (sub in entries.filter { it.isDirectory }) {
-                if (depth(sub.url) <= depth(baseUrl) + 3) {
+                if (depth(sub.url) <= depth(baseUrl) + 4) {
                     val subEntries = try { readDirectory(sub.url, "TvSeries") } catch (_: Exception) { emptyList() }
                     queue.add(sub.url to subEntries)
                 }
@@ -234,7 +246,7 @@ class BDIXStreamProvider : MainAPI() {
 
     private suspend fun readDirectory(url: String, kind: String): List<Entry> {
         directoryCache[url]?.let { return it }
-        val doc = app.get(url, timeout = 20).document
+        val doc = try { app.get(url, timeout = 20).document } catch (_: Exception) { return emptyList() }
         val links = doc.select("a[href]").mapNotNull { a ->
             val label = a.text().trim()
             val href = a.attr("href").trim()
@@ -242,7 +254,7 @@ class BDIXStreamProvider : MainAPI() {
                 label.equals("Parent Directory", true) || label in setOf("Name", "Last modified", "Size", "Description")) {
                 null
             } else {
-                val absolute = try { java.net.URI(url).resolve(href).toString() } catch (_: Exception) { return@mapNotNull null }
+                val absolute = try { URI(url).resolve(href).toString() } catch (_: Exception) { return@mapNotNull null }
                 if (absolute.startsWith("http://172.16.50.") || absolute.startsWith("https://172.16.50.")) label to absolute else null
             }
         }
@@ -250,14 +262,16 @@ class BDIXStreamProvider : MainAPI() {
         val dirs = links.filter { it.second.endsWith("/") }
         val videos = links.filter { isVideo(it.second) }
         val images = links.filter { isImage(it.second) }
-        val imageByParent = images.associateBy { parent(it.second) }
+        val posterUrl = images.firstOrNull()?.second
+
         val output = mutableListOf<Entry>()
 
-        dirs.forEach { (label, href) -> output.add(Entry(clean(label), href, true, kind = kind)) }
-        videos.forEach { (_, href) ->
-            val parentUrl = parent(href)
-            val poster = imageByParent[parentUrl]?.second ?: images.firstOrNull()?.second
-            output.add(Entry(displayName(parentUrl), parentUrl, true, poster, href, kind))
+        dirs.forEach { (label, href) ->
+            output.add(Entry(title = clean(label), url = href, isDirectory = true, poster = posterUrl, kind = kind))
+        }
+
+        videos.forEach { (label, href) ->
+            output.add(Entry(title = clean(label), url = href, isDirectory = false, poster = posterUrl, video = href, kind = kind))
         }
 
         val result = output.distinctBy { it.url to it.video }
