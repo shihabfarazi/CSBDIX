@@ -51,7 +51,7 @@ class BDIXStreamProvider : MainAPI() {
         Category("Animation Movies", "http://172.16.50.14/DHAKA-FLIX-14/Animation%20Movies/"),
         Category("Animation Movies 1080p", "http://172.16.50.14/DHAKA-FLIX-14/Animation%20Movies%20%281080p%29/"),
         Category("3D Movies", "http://172.16.50.7/DHAKA-FLIX-7/3D%20Movies/"),
-        Category("Documentary", "http://172.16.50.10/DHAKA-FLIX-10/Documentary/", "Documentary"),
+        Category("Documentary", "http://172.16.50.10/DHAKA-FLIX-10/Documentary/"),
         Category("WWE & AEW Wrestling", "http://172.16.50.10/DHAKA-FLIX-10/WWE%20%26%20AEW%20Wrestling/", "TvSeries"),
         Category("Awards & TV Shows", "http://172.16.50.10/DHAKA-FLIX-10/Awards%20%26%20TV%20Shows/", "TvSeries")
     )
@@ -253,7 +253,7 @@ class BDIXStreamProvider : MainAPI() {
                 val vUrl = e.video ?: continue
                 val epTitle = displayName(vUrl)
                 val sNum = parseSeason(vUrl) ?: parseSeason(dirUrl) ?: parseSeason(baseUrl) ?: 1
-                val eNum = parseEpisode(vUrl) ?: (episodes.size + 1)
+                val eNum = parseEpisode(vUrl) ?: 0
 
                 episodes.add(
                     newEpisode(vUrl) {
@@ -266,14 +266,28 @@ class BDIXStreamProvider : MainAPI() {
             }
 
             for (sub in entries.filter { it.isDirectory }) {
-                if (depth(sub.url) <= depth(baseUrl) + 6) {
+                if (depth(sub.url) <= depth(baseUrl) + 7) {
                     val subEntries = try { readDirectory(sub.url, "TvSeries") } catch (_: Exception) { emptyList() }
                     queue.add(sub.url to subEntries)
                 }
             }
         }
 
-        return episodes.distinctBy { it.data }
+        // Post-process episodes to guarantee unique, sequential episode numbers per season
+        val groupedBySeason = episodes.groupBy { it.season ?: 1 }
+        val finalEpisodes = mutableListOf<Episode>()
+        groupedBySeason.forEach { (seasonNum, seasonEpList) ->
+            seasonEpList.sortedBy { it.data }.forEachIndexed { idx, ep ->
+                val fixedEpNum = if ((ep.episode ?: 0) <= 0 || seasonEpList.count { it.episode == ep.episode } > 1) {
+                    idx + 1
+                } else {
+                    ep.episode ?: (idx + 1)
+                }
+                finalEpisodes.add(ep.copy(season = seasonNum, episode = fixedEpNum))
+            }
+        }
+
+        return finalEpisodes.distinctBy { it.data }
     }
 
     override suspend fun loadLinks(
