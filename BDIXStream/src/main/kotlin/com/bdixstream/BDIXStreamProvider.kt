@@ -72,7 +72,7 @@ class BDIXStreamProvider : MainAPI() {
         val entries = fetchCategoryMedia(category)
         return newHomePageResponse(
             request.name,
-            entries.take(50).map { it.asSearchResponse(category.kind) }
+            entries.take(50).map { entry -> entry.asSearchResponse(category.kind) }
         )
     }
 
@@ -101,13 +101,13 @@ class BDIXStreamProvider : MainAPI() {
                 subEntries.filter { it.isDirectory || it.video != null }.forEach { entry ->
                     if (entry.video != null || isMovieFolder(entry.title)) {
                         result.add(entry)
-                    } else if (entry.isDirectory && depth(entry.url) < 12) {
+                    } else if (entry.isDirectory && depth(entry.url) < 14) {
                         queue.add(entry.url)
                     }
                 }
             } else {
                 subEntries.filter { it.isDirectory }.forEach { sub ->
-                    if (depth(sub.url) < 12) queue.add(sub.url)
+                    if (depth(sub.url) < 14) queue.add(sub.url)
                 }
             }
         }
@@ -136,7 +136,7 @@ class BDIXStreamProvider : MainAPI() {
         val q = query.trim()
         if (q.length < 2) return emptyList()
         val key = q.lowercase(Locale.ROOT)
-        searchCache[key]?.let { return it.map { e -> e.asSearchResponse(e.kind) } }
+        searchCache[key]?.let { cached -> return cached.map { entry -> entry.asSearchResponse(entry.kind) } }
 
         val matches = mutableListOf<Entry>()
         val queue = ArrayDeque<Pair<Category, String>>()
@@ -144,24 +144,43 @@ class BDIXStreamProvider : MainAPI() {
         val visited = HashSet<String>()
         var pages = 0
 
-        while (queue.isNotEmpty() && pages < 250 && matches.size < 150) {
+        while (queue.isNotEmpty() && pages < 500 && matches.size < 100) {
             val (category, url) = queue.removeFirst()
             if (!visited.add(url)) continue
             val entries = try { readDirectory(url, category.kind) } catch (_: Exception) { emptyList() }
             pages++
+
             for (entry in entries) {
-                if (entry.title.contains(q, true) && (entry.isDirectory || entry.video != null)) {
+                val matchesQuery = entry.title.contains(q, true)
+                if (matchesQuery && (entry.isDirectory || entry.video != null)) {
                     matches.add(entry.copy(kind = category.kind))
                 }
-                if (entry.isDirectory && depth(entry.url) < 12 && queue.size < 1500) {
+                if (entry.isDirectory && depth(entry.url) < 14 && queue.size < 3000) {
                     queue.add(category to entry.url)
                 }
-                if (matches.size >= 150) break
             }
         }
-        val result = matches.distinctBy { it.url }.take(150)
+
+        val rawMatches = matches.distinctBy { it.url }.take(50)
+
+        val result: List<Entry> = coroutineScope {
+            rawMatches.map { entry ->
+                async {
+                    if (entry.isDirectory && entry.poster == null) {
+                        val subEntries = try { readDirectory(entry.url, entry.kind) } catch (_: Exception) { emptyList() }
+                        val poster = subEntries.firstNotNullOfOrNull { it.poster }
+                            ?: subEntries.firstOrNull { it.video != null }?.poster
+                        val video = subEntries.firstOrNull { it.video != null }?.video
+                        entry.copy(poster = poster, video = video ?: entry.video)
+                    } else {
+                        entry
+                    }
+                }
+            }.awaitAll()
+        }
+
         searchCache[key] = result
-        return result.map { it.asSearchResponse(it.kind) }
+        return result.map { entry -> entry.asSearchResponse(entry.kind) }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -360,10 +379,6 @@ class BDIXStreamProvider : MainAPI() {
     private fun isMovieFolder(title: String): Boolean {
         val t = title.lowercase(Locale.ROOT)
         return t.contains("p") || t.contains("20") || t.contains("19") || t.contains("bluray") || t.contains("webrip") || t.contains("hdts")
-    }
-
-    private fun isYearFolder(title: String): Boolean {
-        return Regex("""^\(?([12]\d{3})\)?$""").matches(title.trim())
     }
 
     private fun extractYear(text: String): Int? {
