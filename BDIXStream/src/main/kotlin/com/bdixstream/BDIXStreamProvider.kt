@@ -114,9 +114,16 @@ class BDIXStreamProvider : MainAPI() {
 
         val rawEntries = if (result.isNotEmpty()) result.distinctBy { it.url } else topEntries.filter { it.isDirectory || it.video != null }
 
+        // Sort latest first (by extracted year descending, then title descending)
+        val sortedEntries = rawEntries.sortedWith(
+            compareBy<Entry> { !it.isDirectory }
+                .thenByDescending { extractYear(it.title) ?: 0 }
+                .thenByDescending { it.title }
+        )
+
         // Concurrently fetch posters for movie/series folders
         return coroutineScope {
-            rawEntries.take(45).map { entry ->
+            sortedEntries.take(45).map { entry ->
                 async {
                     if (entry.isDirectory && entry.poster == null) {
                         val subEntries = try { readDirectory(entry.url, entry.kind) } catch (_: Exception) { emptyList() }
@@ -161,7 +168,11 @@ class BDIXStreamProvider : MainAPI() {
             }
         }
 
-        val rawMatches = matches.distinctBy { it.url }.take(50)
+        val rawMatches = matches.distinctBy { it.url }.sortedWith(
+            compareBy<Entry> { !it.isDirectory }
+                .thenByDescending { extractYear(it.title) ?: 0 }
+                .thenByDescending { it.title }
+        ).take(50)
 
         val result: List<Entry> = coroutineScope {
             rawMatches.map { entry ->
@@ -347,8 +358,13 @@ class BDIXStreamProvider : MainAPI() {
             output.add(Entry(title = clean(label), url = href, isDirectory = false, poster = posterUrl, video = href, kind = kind))
         }
 
+        // Sort latest first (by extracted year descending, then title descending)
         val result = output.distinctBy { it.url to it.video }
-            .sortedWith(compareBy<Entry> { !it.isDirectory }.thenBy { it.title.lowercase(Locale.ROOT) })
+            .sortedWith(
+                compareBy<Entry> { !it.isDirectory }
+                    .thenByDescending { extractYear(it.title) ?: 0 }
+                    .thenByDescending { it.title }
+            )
         directoryCache[url] = result
         return result
     }
