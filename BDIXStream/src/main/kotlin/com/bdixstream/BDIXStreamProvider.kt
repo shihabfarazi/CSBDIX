@@ -3,6 +3,7 @@ package com.bdixstream
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
+import kotlinx.coroutines.*
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -71,7 +72,7 @@ class BDIXStreamProvider : MainAPI() {
         val entries = fetchCategoryMedia(category)
         return newHomePageResponse(
             request.name,
-            entries.take(100).map { it.asSearchResponse(category.kind) }
+            entries.take(50).map { it.asSearchResponse(category.kind) }
         )
     }
 
@@ -80,16 +81,34 @@ class BDIXStreamProvider : MainAPI() {
         val yearFolders = topEntries.filter { it.isDirectory && isYearFolder(it.title) }
             .sortedByDescending { extractYear(it.title) ?: 0 }
 
-        if (yearFolders.isNotEmpty()) {
+        val rawEntries = if (yearFolders.isNotEmpty()) {
             val result = mutableListOf<Entry>()
-            for (yf in yearFolders) {
+            for (yf in yearFolders.take(3)) {
                 val media = try { readDirectory(yf.url, category.kind) } catch (_: Exception) { emptyList() }
                 result.addAll(media.filter { it.isDirectory || it.video != null })
+                if (result.size >= 50) break
             }
-            if (result.isNotEmpty()) return result
+            result
+        } else {
+            topEntries.filter { it.isDirectory || it.video != null }
         }
 
-        return topEntries.filter { it.isDirectory || it.video != null }
+        // Concurrently fetch posters for movie folders
+        return coroutineScope {
+            rawEntries.take(40).map { entry ->
+                async {
+                    if (entry.isDirectory && entry.poster == null) {
+                        val subEntries = try { readDirectory(entry.url, entry.kind) } catch (_: Exception) { emptyList() }
+                        val poster = subEntries.firstNotNullOfOrNull { it.poster }
+                            ?: subEntries.firstOrNull { it.video != null }?.poster
+                        val video = subEntries.firstOrNull { it.video != null }?.video
+                        entry.copy(poster = poster, video = video ?: entry.video)
+                    } else {
+                        entry
+                    }
+                }
+            }.awaitAll()
+        }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
