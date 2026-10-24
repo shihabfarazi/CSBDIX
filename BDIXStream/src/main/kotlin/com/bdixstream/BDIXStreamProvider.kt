@@ -114,16 +114,9 @@ class BDIXStreamProvider : MainAPI() {
 
         val rawEntries = if (result.isNotEmpty()) result.distinctBy { it.url } else topEntries.filter { it.isDirectory || it.video != null }
 
-        // Sort latest first (by extracted year descending, then title descending)
-        val sortedEntries = rawEntries.sortedWith(
-            compareBy<Entry> { !it.isDirectory }
-                .thenByDescending { extractYear(it.title) ?: 0 }
-                .thenByDescending { it.title }
-        )
-
         // Concurrently fetch posters for movie/series folders
         return coroutineScope {
-            sortedEntries.take(45).map { entry ->
+            rawEntries.take(45).map { entry ->
                 async {
                     if (entry.isDirectory && entry.poster == null) {
                         val subEntries = try { readDirectory(entry.url, entry.kind) } catch (_: Exception) { emptyList() }
@@ -168,11 +161,7 @@ class BDIXStreamProvider : MainAPI() {
             }
         }
 
-        val rawMatches = matches.distinctBy { it.url }.sortedWith(
-            compareBy<Entry> { !it.isDirectory }
-                .thenByDescending { extractYear(it.title) ?: 0 }
-                .thenByDescending { it.title }
-        ).take(50)
+        val rawMatches = matches.distinctBy { it.url }.take(50)
 
         val result: List<Entry> = coroutineScope {
             rawMatches.map { entry ->
@@ -330,8 +319,11 @@ class BDIXStreamProvider : MainAPI() {
 
     private suspend fun readDirectory(url: String, kind: String): List<Entry> {
         directoryCache[url]?.let { return it }
-        val doc = try { app.get(url, timeout = 20).document } catch (_: Exception) { return emptyList() }
-        val links = doc.select("a[href]").mapNotNull { a ->
+        val output = mutableListOf<Entry>()
+
+        // 1. Try standard HTML parsing (Apache / Nginx)
+        val doc = try { app.get(url, timeout = 20).document } catch (_: Exception) { null }
+        val links = doc?.select("a[href]")?.mapNotNull { a ->
             val label = a.text().trim()
             val href = a.attr("href").trim()
             if (label.isBlank() || href.isBlank() || href.startsWith("?") || href.startsWith("#") ||
@@ -341,21 +333,49 @@ class BDIXStreamProvider : MainAPI() {
                 val absolute = try { URI(url).resolve(href).toString() } catch (_: Exception) { return@mapNotNull null }
                 if (absolute.startsWith("http://172.16.50.") || absolute.startsWith("https://172.16.50.")) label to absolute else null
             }
+        } ?: emptyList()
+
+        if (links.isNotEmpty()) {
+            val dirs = links.filter { it.second.endsWith("/") }
+            val videos = links.filter { isVideo(it.second) }
+            val images = links.filter { isImage(it.second) }
+            val posterUrl = images.firstOrNull()?.second
+
+            dirs.forEach { (label, href) ->
+                output.add(Entry(title = clean(label), url = href, isDirectory = true, poster = posterUrl, kind = kind))
+            }
+            videos.forEach { (label, href) ->
+                output.add(Entry(title = clean(label), url = href, isDirectory = false, poster = posterUrl, video = href, kind = kind))
+            }
         }
 
-        val dirs = links.filter { it.second.endsWith("/") }
-        val videos = links.filter { isVideo(it.second) }
-        val images = links.filter { isImage(it.second) }
-        val posterUrl = images.firstOrNull()?.second
+        // 2. If HTML links are empty, try h5ai JSON API (?action=get)
+        if (output.isEmpty()) {
+            try {
+                val apiUrl = if (url.contains("?")) "$url&action=get" else "$url?action=get"
+                val jsonResponse = app.get(apiUrl, timeout = 20).text
+                val hrefRegex = Regex(""""href"\s*:\s*"([^"]+)"""")
+                val labelRegex = Regex(""""label"\s*:\s*"([^"]+)"""")
+                val items = jsonResponse.split("},{")
+                for (item in items) {
+                    val hrefMatch = hrefRegex.find(item)?.groupValues?.get(1) ?: continue
+                    val labelMatch = labelRegex.find(item)?.groupValues?.get(1) ?: continue
+                    val cleanLabel = URLDecoder.decode(labelMatch, StandardCharsets.UTF_8.name()).trim()
+                    if (cleanLabel.isBlank() || cleanLabel.equals("Parent Directory", true)) continue
 
-        val output = mutableListOf<Entry>()
+                    val absolute = try { URI(url).resolve(hrefMatch).toString() } catch (_: Exception) { continue }
+                    if (!absolute.startsWith("http://172.16.50.") && !absolute.startsWith("https://172.16.50.")) continue
 
-        dirs.forEach { (label, href) ->
-            output.add(Entry(title = clean(label), url = href, isDirectory = true, poster = posterUrl, kind = kind))
-        }
+                    val isDir = absolute.endsWith("/") || item.contains("folder")
+                    val isVid = isVideo(absolute)
 
-        videos.forEach { (label, href) ->
-            output.add(Entry(title = clean(label), url = href, isDirectory = false, poster = posterUrl, video = href, kind = kind))
+                    if (isDir) {
+                        output.add(Entry(title = clean(cleanLabel), url = absolute, isDirectory = true, kind = kind))
+                    } else if (isVid) {
+                        output.add(Entry(title = clean(cleanLabel), url = absolute, isDirectory = false, video = absolute, kind = kind))
+                    }
+                }
+            } catch (_: Exception) {}
         }
 
         // Sort latest first (by extracted year descending, then title descending)
