@@ -241,7 +241,7 @@ class BDIXStreamProvider : MainAPI() {
         val visited = HashSet<String>()
         var count = 0
 
-        while (queue.isNotEmpty() && count < 100) {
+        while (queue.isNotEmpty() && count < 150) {
             val (dirUrl, entries) = queue.removeFirst()
             if (!visited.add(dirUrl)) continue
             count++
@@ -252,7 +252,7 @@ class BDIXStreamProvider : MainAPI() {
             for (e in videoEntries) {
                 val vUrl = e.video ?: continue
                 val epTitle = displayName(vUrl)
-                val sNum = parseSeason(vUrl) ?: parseSeason(dirUrl) ?: 1
+                val sNum = parseSeason(vUrl) ?: parseSeason(dirUrl) ?: parseSeason(baseUrl) ?: 1
                 val eNum = parseEpisode(vUrl) ?: (episodes.size + 1)
 
                 episodes.add(
@@ -388,11 +388,14 @@ class BDIXStreamProvider : MainAPI() {
     private fun parseSeason(text: String): Int? {
         return Regex("""(?i)\bS(\d{1,2})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()
             ?: Regex("""(?i)Season\s*(\d{1,2})""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+            ?: Regex("""(?i)\b(\d{1,2})x\d{1,2}\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()
     }
 
     private fun parseEpisode(text: String): Int? {
         return Regex("""(?i)\bE(\d{1,3})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()
             ?: Regex("""(?i)Episode\s*(\d{1,3})""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+            ?: Regex("""(?i)\b\d{1,2}x(\d{1,3})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+            ?: Regex("""(?i)\bE\.?P?\.?\s*(\d{1,3})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()
     }
 
     private fun qualityFrom(url: String): Int =
