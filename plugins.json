@@ -18,10 +18,10 @@
         "repositoryUrl": "https://github.com/shihabfarazi/CSBDIX",
         "url": "https://raw.githubusercontent.com/shihabfarazi/CSBDIX/builds/BDIXStream.cs3",
         "jarUrl": "https://raw.githubusercontent.com/shihabfarazi/CSBDIX/builds/BDIXStream.jar",
-        "fileSize": 31686,
-        "jarFileSize": 31686,
-        "fileHash": "sha256-4b19ef4f5f6c69eefb032f0f3ed2cadd06619ab0a2903252e9e0733718c73dac",
-        "jarHash": "sha256-4b19ef4f5f6c69eefb032f0f3ed2cadd06619ab0a2903252e9e0733718c73dac",
+        "fileSize": 32187,
+        "jarFileSize": 32187,
+        "fileHash": "sha256-c9bfe6b96bd7240aed8cf017fd434c5dba77997dce52efc239b9560f2bfc5972",
+        "jarHash": "sha256-c9bfe6b96bd7240aed8cf017fd434c5dba77997dce52efc239b9560f2bfc5972",
         "iconUrl": "https://www.google.com/s2/favicons?domain=github.com&sz=64"
     }
 ]
