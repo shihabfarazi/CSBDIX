@@ -82,12 +82,11 @@ class BDIXStreamProvider : MainAPI() {
 
         if (yearFolders.isNotEmpty()) {
             val result = mutableListOf<Entry>()
-            for (yf in yearFolders.take(4)) {
-                val media = readDirectory(yf.url, category.kind)
+            for (yf in yearFolders) {
+                val media = try { readDirectory(yf.url, category.kind) } catch (_: Exception) { emptyList() }
                 result.addAll(media.filter { it.isDirectory || it.video != null })
-                if (result.size >= 100) break
             }
-            return result
+            if (result.isNotEmpty()) return result
         }
 
         return topEntries.filter { it.isDirectory || it.video != null }
@@ -153,7 +152,6 @@ class BDIXStreamProvider : MainAPI() {
             }
         }
 
-        // If this is a directory folder (like a TV series root or movie year folder) containing subfolders or videos
         val episodes = collectEpisodes(url, entries, poster)
         if (episodes.isNotEmpty() && (kind == "TvSeries" || kind == "Anime")) {
             val tvType = if (kind == "Anime") TvType.Anime else TvType.TvSeries
