@@ -78,24 +78,45 @@ class BDIXStreamProvider : MainAPI() {
 
     private suspend fun fetchCategoryMedia(category: Category): List<Entry> {
         val topEntries = readDirectory(category.url, category.kind)
-        val yearFolders = topEntries.filter { it.isDirectory && isYearFolder(it.title) }
-            .sortedByDescending { extractYear(it.title) ?: 0 }
+        val result = mutableListOf<Entry>()
+        val queue = ArrayDeque<String>()
 
-        val rawEntries = if (yearFolders.isNotEmpty()) {
-            val result = mutableListOf<Entry>()
-            for (yf in yearFolders.take(3)) {
-                val media = try { readDirectory(yf.url, category.kind) } catch (_: Exception) { emptyList() }
-                result.addAll(media.filter { it.isDirectory || it.video != null })
-                if (result.size >= 50) break
-            }
-            result
-        } else {
-            topEntries.filter { it.isDirectory || it.video != null }
+        topEntries.forEach { 
+            if (it.isDirectory) queue.add(it.url)
+            else if (it.video != null) result.add(it)
         }
 
-        // Concurrently fetch posters for movie folders
+        val visited = HashSet<String>()
+        var scanned = 0
+
+        while (queue.isNotEmpty() && result.size < 60 && scanned < 50) {
+            val dirUrl = queue.removeFirst()
+            if (!visited.add(dirUrl)) continue
+            scanned++
+
+            val subEntries = try { readDirectory(dirUrl, category.kind) } catch (_: Exception) { emptyList() }
+            val videos = subEntries.filter { it.video != null }
+
+            if (videos.isNotEmpty() || subEntries.any { isVideoFolder(it.title) }) {
+                subEntries.filter { it.isDirectory || it.video != null }.forEach { entry ->
+                    if (entry.video != null || isMovieFolder(entry.title)) {
+                        result.add(entry)
+                    } else if (entry.isDirectory && depth(entry.url) < 12) {
+                        queue.add(entry.url)
+                    }
+                }
+            } else {
+                subEntries.filter { it.isDirectory }.forEach { sub ->
+                    if (depth(sub.url) < 12) queue.add(sub.url)
+                }
+            }
+        }
+
+        val rawEntries = if (result.isNotEmpty()) result.distinctBy { it.url } else topEntries.filter { it.isDirectory || it.video != null }
+
+        // Concurrently fetch posters for movie/series folders
         return coroutineScope {
-            rawEntries.take(40).map { entry ->
+            rawEntries.take(45).map { entry ->
                 async {
                     if (entry.isDirectory && entry.poster == null) {
                         val subEntries = try { readDirectory(entry.url, entry.kind) } catch (_: Exception) { emptyList() }
@@ -172,12 +193,12 @@ class BDIXStreamProvider : MainAPI() {
         }
 
         val episodes = collectEpisodes(url, entries, poster)
-        if (episodes.isNotEmpty() && (kind == "TvSeries" || kind == "Anime")) {
-            val tvType = if (kind == "Anime") TvType.Anime else TvType.TvSeries
+        if (episodes.isNotEmpty()) {
+            val tvType = if (kind == "Anime") TvType.Anime else if (kind == "TvSeries") TvType.TvSeries else TvType.Movie
             return newTvSeriesLoadResponse(title, url, tvType, episodes) {
                 this.posterUrl = poster
                 this.year = year
-                this.plot = "BDIX $kind library."
+                this.plot = "BDIX library."
             }
         }
 
@@ -201,7 +222,7 @@ class BDIXStreamProvider : MainAPI() {
         val visited = HashSet<String>()
         var count = 0
 
-        while (queue.isNotEmpty() && count < 60) {
+        while (queue.isNotEmpty() && count < 100) {
             val (dirUrl, entries) = queue.removeFirst()
             if (!visited.add(dirUrl)) continue
             count++
@@ -226,7 +247,7 @@ class BDIXStreamProvider : MainAPI() {
             }
 
             for (sub in entries.filter { it.isDirectory }) {
-                if (depth(sub.url) <= depth(baseUrl) + 4) {
+                if (depth(sub.url) <= depth(baseUrl) + 6) {
                     val subEntries = try { readDirectory(sub.url, "TvSeries") } catch (_: Exception) { emptyList() }
                     queue.add(sub.url to subEntries)
                 }
@@ -329,6 +350,16 @@ class BDIXStreamProvider : MainAPI() {
         url.contains("Anime", true) || url.contains("Cartoon", true) -> "Anime"
         url.contains("Documentary", true) -> "Documentary"
         else -> "Movie"
+    }
+
+    private fun isVideoFolder(title: String): Boolean {
+        val t = title.lowercase(Locale.ROOT)
+        return t.contains("1080p") || t.contains("720p") || t.contains("bluray") || t.contains("web-dl") || t.contains("season") || t.contains("s01") || t.contains("s02")
+    }
+
+    private fun isMovieFolder(title: String): Boolean {
+        val t = title.lowercase(Locale.ROOT)
+        return t.contains("p") || t.contains("20") || t.contains("19") || t.contains("bluray") || t.contains("webrip") || t.contains("hdts")
     }
 
     private fun isYearFolder(title: String): Boolean {
