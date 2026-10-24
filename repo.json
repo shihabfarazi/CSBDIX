@@ -1,0 +1,8 @@
+{
+  "name": "BDIX Stream Repository",
+  "description": "BDIX Dhaka Flix extensions for CloudStream",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/shihabfarazi/CSBDIX/builds/plugins.json"
+  ]
+}
